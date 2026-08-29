@@ -159,10 +159,11 @@ func TestLoadRejectsInvalidCache(t *testing.T) {
 	}{
 		{name: "malformed JSON", data: "{", want: "invalid JSON"},
 		{name: "missing command", data: `{ "documents": [] }`, want: "GoCommand is required"},
-		{name: "missing documents", data: `{ "go_command": "go" }`, want: "Documents is required"},
-		{name: "missing topic", data: `{ "go_command": "go", "documents": [{"help_path":"go help x","text":"x"}] }`, want: "Documents[0].Topic is required"},
-		{name: "missing help path", data: `{ "go_command": "go", "documents": [{"topic":"x","text":"x"}] }`, want: "Documents[0].HelpPath is required"},
-		{name: "missing text", data: `{ "go_command": "go", "documents": [{"topic":"x","help_path":"go help x"}] }`, want: "Documents[0].Text is required"},
+		{name: "missing version", data: `{ "go_command": "go", "documents": [] }`, want: "GoVersion is required"},
+		{name: "missing documents", data: `{ "go_command": "go", "go_version": "go version test" }`, want: "Documents is required"},
+		{name: "missing topic", data: `{ "go_command": "go", "go_version": "go version test", "documents": [{"help_path":"go help x","text":"x"}] }`, want: "Documents[0].Topic is required"},
+		{name: "missing help path", data: `{ "go_command": "go", "go_version": "go version test", "documents": [{"topic":"x","text":"x"}] }`, want: "Documents[0].HelpPath is required"},
+		{name: "missing text", data: `{ "go_command": "go", "go_version": "go version test", "documents": [{"topic":"x","help_path":"go help x"}] }`, want: "Documents[0].Text is required"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

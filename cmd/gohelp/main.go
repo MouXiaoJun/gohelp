@@ -22,12 +22,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var command string
 	var cache string
 	var jsonOutput bool
+	var refresh bool
 	flags := flag.NewFlagSet("gohelp", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	flags.StringVar(&query, "q", "", "keyword or flag to search")
 	flags.StringVar(&command, "go", "go", "go executable to query")
 	flags.StringVar(&cache, "cache", "", "index cache file")
 	flags.BoolVar(&jsonOutput, "json", false, "write search results as JSON")
+	flags.BoolVar(&refresh, "refresh", false, "rebuild the index cache")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -41,7 +43,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	index, err := loadOrBuild(ctx, command, cache)
+	index, err := loadOrBuild(ctx, command, cache, refresh)
 	if err != nil {
 		fmt.Fprintf(stderr, "gohelp: %v\n", err)
 		return 1
@@ -67,12 +69,20 @@ func run(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func loadOrBuild(ctx context.Context, command, cache string) (*gohelp.Index, error) {
+func loadOrBuild(ctx context.Context, command, cache string, refresh bool) (*gohelp.Index, error) {
 	if cache == "" {
 		return gohelp.New(ctx, gohelp.Options{GoCommand: command})
 	}
-	if index, err := gohelp.Load(cache); err == nil {
-		return index, nil
+	if !refresh {
+		if index, err := gohelp.Load(cache); err == nil && index.GoCommand == command {
+			version, err := gohelp.Version(ctx, gohelp.Options{GoCommand: command})
+			if err != nil {
+				return nil, err
+			}
+			if strings.TrimSpace(index.GoVersion) == version {
+				return index, nil
+			}
+		}
 	}
 	index, err := gohelp.New(ctx, gohelp.Options{GoCommand: command})
 	if err != nil {

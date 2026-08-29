@@ -72,6 +72,9 @@ func (index *Index) validate() error {
 	if strings.TrimSpace(index.GoCommand) == "" {
 		return fmt.Errorf("GoCommand is required")
 	}
+	if strings.TrimSpace(index.GoVersion) == "" {
+		return fmt.Errorf("GoVersion is required")
+	}
 	if index.Documents == nil {
 		return fmt.Errorf("Documents is required")
 	}
@@ -102,6 +105,22 @@ type entry struct {
 	summary string
 }
 
+// Version returns the version reported by the configured go command.
+func Version(ctx context.Context, options Options) (string, error) {
+	if ctx == nil {
+		return "", fmt.Errorf("gohelp: nil context")
+	}
+	command := options.GoCommand
+	if command == "" {
+		command = "go"
+	}
+	version, err := run(ctx, command, "version")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(version), nil
+}
+
 // New builds an index from the currently installed go command.
 func New(ctx context.Context, options Options) (*Index, error) {
 	if ctx == nil {
@@ -112,7 +131,7 @@ func New(ctx context.Context, options Options) (*Index, error) {
 		command = "go"
 	}
 
-	version, err := run(ctx, command, "version")
+	version, err := Version(ctx, options)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +142,7 @@ func New(ctx context.Context, options Options) (*Index, error) {
 
 	index := &Index{
 		GoCommand: command,
-		GoVersion: strings.TrimSpace(version),
+		GoVersion: version,
 		Documents: []Document{{
 			Topic:    "go",
 			Kind:     "overview",

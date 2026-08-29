@@ -45,9 +45,10 @@ if err != nil {
 go run ./cmd/gohelp -q=-modfile
 go run ./cmd/gohelp -q testflag -json
 go run ./cmd/gohelp -cache gohelp-cache.json -q=-modfile
+go run ./cmd/gohelp -cache gohelp-cache.json -refresh -q=-modfile
 ```
 
-The CLI prints matching snippets and help paths. Use `-json` for a JSON array of matches, `-go` to select the executable, and `-cache` to load or refresh an index cache. Without `-cache`, the CLI keeps rebuilding the index as before.
+The CLI prints matching snippets and help paths. Use `-json` for a JSON array of matches, `-go` to select the executable, `-cache` to load or refresh an index cache, and `-refresh` to force rebuilding it. Without `-cache`, the CLI keeps rebuilding the index as before.
 
 ## Development
 
