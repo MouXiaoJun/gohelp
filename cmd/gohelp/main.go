@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -13,44 +14,72 @@ import (
 )
 
 func main() {
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+func run(args []string, stdout, stderr io.Writer) int {
 	var query string
 	var command string
+	var cache string
 	var jsonOutput bool
-	flag.StringVar(&query, "q", "", "keyword or flag to search")
-	flag.StringVar(&command, "go", "go", "go executable to query")
-	flag.BoolVar(&jsonOutput, "json", false, "write search results as JSON")
-	flag.Parse()
+	flags := flag.NewFlagSet("gohelp", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	flags.StringVar(&query, "q", "", "keyword or flag to search")
+	flags.StringVar(&command, "go", "go", "go executable to query")
+	flags.StringVar(&cache, "cache", "", "index cache file")
+	flags.BoolVar(&jsonOutput, "json", false, "write search results as JSON")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
 	if query == "" {
-		query = strings.Join(flag.Args(), " ")
+		query = strings.Join(flags.Args(), " ")
 	}
 	if strings.TrimSpace(query) == "" {
-		flag.Usage()
-		os.Exit(2)
+		flags.Usage()
+		return 2
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	index, err := gohelp.New(ctx, gohelp.Options{GoCommand: command})
+	index, err := loadOrBuild(ctx, command, cache)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "gohelp: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "gohelp: %v\n", err)
+		return 1
 	}
 	matches := index.Search(query)
 	if jsonOutput {
-		if err := json.NewEncoder(os.Stdout).Encode(matches); err != nil {
-			fmt.Fprintf(os.Stderr, "gohelp: write JSON: %v\n", err)
-			os.Exit(1)
+		if err := json.NewEncoder(stdout).Encode(matches); err != nil {
+			fmt.Fprintf(stderr, "gohelp: write JSON: %v\n", err)
+			return 1
 		}
-		return
+		return 0
 	}
 	if len(matches) == 0 {
-		fmt.Printf("No help matches for %q.\n", query)
-		return
+		fmt.Fprintf(stdout, "No help matches for %q.\n", query)
+		return 0
 	}
 	for _, match := range matches {
-		fmt.Printf("%s\n  %s\n", match.Topic, match.HelpPath)
+		fmt.Fprintf(stdout, "%s\n  %s\n", match.Topic, match.HelpPath)
 		for _, snippet := range match.Snippets {
-			fmt.Printf("    %s\n", snippet)
+			fmt.Fprintf(stdout, "    %s\n", snippet)
 		}
 	}
+	return 0
+}
+
+func loadOrBuild(ctx context.Context, command, cache string) (*gohelp.Index, error) {
+	if cache == "" {
+		return gohelp.New(ctx, gohelp.Options{GoCommand: command})
+	}
+	if index, err := gohelp.Load(cache); err == nil {
+		return index, nil
+	}
+	index, err := gohelp.New(ctx, gohelp.Options{GoCommand: command})
+	if err != nil {
+		return nil, err
+	}
+	if err := index.Save(cache); err != nil {
+		return nil, err
+	}
+	return index, nil
 }

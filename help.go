@@ -3,7 +3,9 @@ package gohelp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -29,6 +31,62 @@ type Document struct {
 	Summary  string `json:"summary,omitempty"`
 	HelpPath string `json:"help_path"`
 	Text     string `json:"text"`
+}
+
+// Save writes the index as readable JSON with owner-only permissions.
+func (index *Index) Save(path string) error {
+	if index == nil {
+		return fmt.Errorf("gohelp: save index %q: nil index", path)
+	}
+	data, err := json.MarshalIndent(index, "", "  ")
+	if err != nil {
+		return fmt.Errorf("gohelp: save index %q: encode JSON: %w", path, err)
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return fmt.Errorf("gohelp: save index %q: %w", path, err)
+	}
+	if err := os.Chmod(path, 0600); err != nil {
+		return fmt.Errorf("gohelp: save index %q: set permissions: %w", path, err)
+	}
+	return nil
+}
+
+// Load reads and validates an index saved as JSON.
+func Load(path string) (*Index, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("gohelp: load index %q: %w", path, err)
+	}
+	var index Index
+	if err := json.Unmarshal(data, &index); err != nil {
+		return nil, fmt.Errorf("gohelp: invalid index %q: invalid JSON: %w", path, err)
+	}
+	if err := index.validate(); err != nil {
+		return nil, fmt.Errorf("gohelp: invalid index %q: %w", path, err)
+	}
+	return &index, nil
+}
+
+func (index *Index) validate() error {
+	if strings.TrimSpace(index.GoCommand) == "" {
+		return fmt.Errorf("GoCommand is required")
+	}
+	if index.Documents == nil {
+		return fmt.Errorf("Documents is required")
+	}
+	for i, document := range index.Documents {
+		if strings.TrimSpace(document.Topic) == "" {
+			return fmt.Errorf("Documents[%d].Topic is required", i)
+		}
+		if strings.TrimSpace(document.HelpPath) == "" {
+			return fmt.Errorf("Documents[%d].HelpPath is required", i)
+		}
+		if strings.TrimSpace(document.Text) == "" {
+			return fmt.Errorf("Documents[%d].Text is required", i)
+		}
+	}
+	return nil
 }
 
 // Match is a search result with lines from the matching help document.

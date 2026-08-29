@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -111,6 +113,68 @@ func TestIndexJSONRoundTrip(t *testing.T) {
 	}
 	if len(got.Documents) != 1 || got.Documents[0] != want.Documents[0] || got.GoVersion != want.GoVersion {
 		t.Errorf("JSON round trip = %#v, want %#v", got, *want)
+	}
+}
+
+func TestIndexSaveLoad(t *testing.T) {
+	want := &Index{
+		GoCommand: "go",
+		GoVersion: "go version go1.23.0 darwin/arm64",
+		Documents: []Document{{
+			Topic:    "build",
+			Kind:     "command",
+			HelpPath: "go help build",
+			Text:     "usage: go build",
+		}},
+	}
+	path := filepath.Join(t.TempDir(), "index.json")
+	if err := want.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0600 {
+		t.Errorf("cache permissions = %o, want 600", got)
+	}
+
+	got, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Load() = %#v, want %#v", got, want)
+	}
+	if matches := got.Search("build"); len(matches) != 1 || matches[0].HelpPath != "go help build" {
+		t.Errorf("loaded Search() = %#v, want build match", matches)
+	}
+}
+
+func TestLoadRejectsInvalidCache(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+		want string
+	}{
+		{name: "malformed JSON", data: "{", want: "invalid JSON"},
+		{name: "missing command", data: `{ "documents": [] }`, want: "GoCommand is required"},
+		{name: "missing documents", data: `{ "go_command": "go" }`, want: "Documents is required"},
+		{name: "missing topic", data: `{ "go_command": "go", "documents": [{"help_path":"go help x","text":"x"}] }`, want: "Documents[0].Topic is required"},
+		{name: "missing help path", data: `{ "go_command": "go", "documents": [{"topic":"x","text":"x"}] }`, want: "Documents[0].HelpPath is required"},
+		{name: "missing text", data: `{ "go_command": "go", "documents": [{"topic":"x","help_path":"go help x"}] }`, want: "Documents[0].Text is required"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "index.json")
+			if err := os.WriteFile(path, []byte(test.data), 0600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(path)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Load() error = %v, want %q", err, test.want)
+			}
+		})
 	}
 }
 
