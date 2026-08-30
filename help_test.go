@@ -149,6 +149,72 @@ func TestIndexSaveLoad(t *testing.T) {
 	if matches := got.Search("build"); len(matches) != 1 || matches[0].HelpPath != "go help build" {
 		t.Errorf("loaded Search() = %#v, want build match", matches)
 	}
+
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Run("invalid index preserves cache", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "index.json")
+		if err := os.WriteFile(path, original, 0600); err != nil {
+			t.Fatal(err)
+		}
+		missingVersion := *want
+		missingVersion.GoVersion = ""
+		missingText := *want
+		missingText.Documents = []Document{{Topic: "build", HelpPath: "go help build"}}
+		for _, invalid := range []*Index{nil, {}, &missingVersion, &missingText} {
+			if err := invalid.Save(path); err == nil {
+				t.Errorf("Save(%#v) succeeded, want validation error", invalid)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil || string(data) != string(original) {
+				t.Fatalf("invalid Save changed previous cache: data=%s, err=%v", data, err)
+			}
+		}
+	})
+	t.Run("replacement preserves previous file", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "index.json")
+		if err := os.WriteFile(path, original, 0600); err != nil {
+			t.Fatal(err)
+		}
+		// A hard link observes the previous file even after the cache path is replaced.
+		previous := path + ".previous"
+		if err := os.Link(path, previous); err != nil {
+			t.Skipf("hard links unavailable: %v", err)
+		}
+		updated := *want
+		updated.GoVersion = "go version replacement"
+		if err := updated.Save(path); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(previous)
+		if err != nil || string(data) != string(original) {
+			t.Errorf("Save overwrote previous file: data=%s, err=%v", data, err)
+		}
+		got, err := Load(path)
+		if err != nil || !reflect.DeepEqual(got, &updated) {
+			t.Fatalf("replacement Load() = %#v, %v", got, err)
+		}
+		entries, err := os.ReadDir(filepath.Dir(path))
+		if err != nil || len(entries) != 2 {
+			t.Errorf("cache directory = %v, %v; want cache and previous file only", entries, err)
+		}
+	})
+	t.Run("failed replacement cleans up", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "cache")
+		if err := os.Mkdir(target, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := want.Save(target); err == nil {
+			t.Fatal("Save to a directory succeeded")
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil || len(entries) != 1 || !entries[0].IsDir() {
+			t.Errorf("failed Save changed target or left temporary files: %v, %v", entries, err)
+		}
+	})
 }
 
 func TestLoadRejectsInvalidCache(t *testing.T) {

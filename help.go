@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -33,21 +34,37 @@ type Document struct {
 	Text     string `json:"text"`
 }
 
-// Save writes the index as readable JSON with owner-only permissions.
+// Save validates the index and replaces path with readable JSON with owner-only
+// permissions. It writes and closes a temporary file in the same directory before
+// renaming it over path. Atomic replacement is not guaranteed on non-Unix systems.
+// Save does not guarantee durability across a crash or power loss.
 func (index *Index) Save(path string) error {
 	if index == nil {
 		return fmt.Errorf("gohelp: save index %q: nil index", path)
+	}
+	if err := index.validate(); err != nil {
+		return fmt.Errorf("gohelp: save index %q: invalid index: %w", path, err)
 	}
 	data, err := json.MarshalIndent(index, "", "  ")
 	if err != nil {
 		return fmt.Errorf("gohelp: save index %q: encode JSON: %w", path, err)
 	}
 	data = append(data, '\n')
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		return fmt.Errorf("gohelp: save index %q: %w", path, err)
+	file, err := os.CreateTemp(filepath.Dir(path), ".gohelp-*.json")
+	if err != nil {
+		return fmt.Errorf("gohelp: save index %q: create temporary file: %w", path, err)
 	}
-	if err := os.Chmod(path, 0600); err != nil {
-		return fmt.Errorf("gohelp: save index %q: set permissions: %w", path, err)
+	defer os.Remove(file.Name())
+	_, writeErr := file.Write(data)
+	closeErr := file.Close()
+	if writeErr != nil {
+		return fmt.Errorf("gohelp: save index %q: write temporary file: %w", path, writeErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("gohelp: save index %q: close temporary file: %w", path, closeErr)
+	}
+	if err := os.Rename(file.Name(), path); err != nil {
+		return fmt.Errorf("gohelp: save index %q: replace cache: %w", path, err)
 	}
 	return nil
 }

@@ -39,6 +39,14 @@ if err != nil {
 
 `Load` rejects incomplete or malformed cache files.
 
+`Save` now applies the same field validation before touching the cache. It writes
+owner-only JSON to a temporary file in the cache directory, closes it, then replaces
+the destination. Failed validation, writing, or closing leaves the previous cache
+untouched; temporary files are removed on failure. The directory must be writable.
+The destination entry is replaced (including a symbolic link), rather than writing
+through it. Replacement is atomic on Unix; this is not guaranteed on Windows or
+other non-Unix platforms, and crash/power-loss durability is not promised.
+
 ## CLI
 
 ```text
