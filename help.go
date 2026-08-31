@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Options controls how New invokes the go command.
@@ -109,7 +111,7 @@ func (index *Index) validate() error {
 	return nil
 }
 
-// Match is a search result with lines from the matching help document.
+// Match is a search result with snippets from the matching help document.
 type Match struct {
 	Topic    string   `json:"topic"`
 	Snippets []string `json:"snippets"`
@@ -207,6 +209,8 @@ func New(ctx context.Context, options Options) (*Index, error) {
 }
 
 // Search returns documents containing every whitespace-separated query term.
+// Matching is case-insensitive. Terms starting with '-' match option boundaries;
+// other terms match substrings. Snippets include adjacent indented explanations.
 // Results are ranked by the number of term occurrences, with topic matches first.
 func (index *Index) Search(query string) []Match {
 	if index == nil {
@@ -229,12 +233,13 @@ func (index *Index) Search(query string) []Match {
 		score := 0
 		matches := true
 		for _, term := range terms {
-			if !strings.Contains(haystack, term) {
+			count := countTerm(haystack, term)
+			if count == 0 {
 				matches = false
 				break
 			}
-			score += strings.Count(haystack, term)
-			if strings.Contains(topic, term) {
+			score += count
+			if countTerm(topic, term) > 0 {
 				score += 100
 			}
 		}
@@ -311,17 +316,35 @@ func uniqueTerms(query string) []string {
 func snippets(text string, terms []string) []string {
 	result := make([]string, 0, 5)
 	seen := make(map[string]bool)
-	for _, line := range strings.Split(text, "\n") {
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
 		lower := strings.ToLower(line)
 		matched := false
 		for _, term := range terms {
-			if strings.Contains(lower, term) {
+			if countTerm(lower, term) > 0 {
 				matched = true
 				break
 			}
 		}
-		line = strings.TrimSpace(line)
-		if !matched || line == "" || seen[line] {
+		if !matched || strings.TrimSpace(line) == "" {
+			continue
+		}
+		// ponytail: use Go help's indentation, not a general document parser;
+		// a help format change needs fixture updates. Stop at peer sections.
+		end := i + 1
+		for next := end; next < len(lines); next++ {
+			if strings.TrimSpace(lines[next]) == "" {
+				continue
+			}
+			if indentation(lines[next]) <= indentation(line) {
+				break
+			}
+			end = next + 1
+		}
+		line = strings.TrimSpace(strings.Join(lines[i:end], "\n"))
+		i = end - 1
+		if seen[line] {
 			continue
 		}
 		seen[line] = true
@@ -339,6 +362,48 @@ func snippets(text string, terms []string) []string {
 		}
 	}
 	return result
+}
+
+// countTerm receives lower-case text and terms, just like Search and snippets.
+func countTerm(text, term string) int {
+	if !strings.HasPrefix(term, "-") {
+		return strings.Count(text, term)
+	}
+	count := 0
+	for offset := 0; offset < len(text); {
+		i := strings.Index(text[offset:], term)
+		if i < 0 {
+			break
+		}
+		i += offset
+		end := i + len(term)
+		before, _ := utf8.DecodeLastRuneInString(text[:i])
+		after, _ := utf8.DecodeRuneInString(text[end:])
+		if !optionRune(before) && !optionRune(after) {
+			count++
+		}
+		offset = end
+	}
+	return count
+}
+
+func optionRune(r rune) bool {
+	return r == '-' || r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
+}
+
+func indentation(line string) int {
+	width := 0
+	for _, r := range line {
+		switch r {
+		case ' ':
+			width++
+		case '\t':
+			width += 8 - width%8
+		default:
+			return width
+		}
+	}
+	return width
 }
 
 func run(ctx context.Context, command string, args ...string) (string, error) {

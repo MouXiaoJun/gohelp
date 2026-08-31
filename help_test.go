@@ -49,6 +49,59 @@ func TestSearchRequiresAllTerms(t *testing.T) {
 	}
 }
 
+func TestSearchOptionBoundaries(t *testing.T) {
+	for _, test := range []struct {
+		text string
+		want bool
+	}{
+		{"-bench regexp", true},
+		{"use '-bench=.' or (-BENCH X).", true},
+		{"[-bench], -bench;", true},
+		{"-benchtime t", false},
+		{"-benchmem", false},
+		{"--bench", false},
+		{"prefix-bench", false},
+		{"-bench-extra", false},
+		{"-bench_extra", false},
+		{"-bench2", false},
+		{"-bench中文", false},
+		{"中文-bench", false},
+	} {
+		t.Run(test.text, func(t *testing.T) {
+			index := &Index{Documents: []Document{{Topic: "testflag", Text: test.text}}}
+			if got := len(index.Search("-bench")) == 1; got != test.want {
+				t.Fatalf("Search(-bench) in %q = %v, want %v", test.text, got, test.want)
+			}
+		})
+	}
+	index := &Index{Documents: []Document{
+		{Topic: "a", Text: "-bench\n" + strings.Repeat("-benchtime ", 10)},
+		{Topic: "b", Text: "-bench -bench"},
+	}}
+	if matches := index.Search("-bench"); len(matches) != 2 || matches[0].Topic != "b" {
+		t.Fatalf("option prefixes must not affect ranking: %#v", matches)
+	}
+	if matches := index.Search("bencht"); len(matches) != 1 || matches[0].Topic != "a" {
+		t.Fatalf("ordinary words must retain substring matching: %#v", matches)
+	}
+}
+
+func TestSearchIncludesAdjacentExplanation(t *testing.T) {
+	const text = "\t-bench regexp\n\t    Run matching benchmarks.\n\t    Use -bench=. for all.\n\n\t    Another paragraph.\n\t        go test -bench=.\n\n\t-benchtime t\n\t    Run for this duration.\n\nOther help.\n"
+	for _, newline := range []string{"\n", "\r\n"} {
+		index := &Index{Documents: []Document{{Topic: "testflag", Text: strings.ReplaceAll(text, "\n", newline)}}}
+		matches := index.Search("-bench")
+		want := strings.TrimSpace(strings.Split(text, "\n\n\t-benchtime")[0])
+		if len(matches) != 1 || len(matches[0].Snippets) != 1 || matches[0].Snippets[0] != want {
+			t.Fatalf("Search(-bench) snippets = %#v, want %q", matches, want)
+		}
+		matches = index.Search("-benchtime")
+		if len(matches) != 1 || len(matches[0].Snippets) != 1 || matches[0].Snippets[0] != "-benchtime t\n\t    Run for this duration." {
+			t.Fatalf("Search(-benchtime) snippets = %#v", matches)
+		}
+	}
+}
+
 func TestNewIndexesCurrentGoHelp(t *testing.T) {
 	index, err := New(context.Background(), Options{})
 	if err != nil {
@@ -66,6 +119,26 @@ func TestNewIndexesCurrentGoHelp(t *testing.T) {
 	matches := index.Search("-modfile")
 	if !hasMatch(matches, "build", "go help build") {
 		t.Errorf("Search(-modfile) = %#v, want go help build", matches)
+	}
+	t.Log(index.GoVersion)
+	for _, flag := range []string{"-bench", "-benchtime"} {
+		found := false
+		for _, match := range index.Search(flag) {
+			if match.Topic != "testflag" {
+				continue
+			}
+			for _, snippet := range match.Snippets {
+				if strings.HasPrefix(snippet, flag+" ") && strings.Contains(snippet, "\n") {
+					found = true
+				}
+				if flag == "-bench" && strings.Contains(snippet, "-benchtime") {
+					t.Errorf("-bench snippet includes -benchtime: %q", snippet)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("real go help testflag has no %s definition with explanation", flag)
+		}
 	}
 }
 

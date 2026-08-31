@@ -63,7 +63,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	for _, match := range matches {
 		fmt.Fprintf(stdout, "%s\n  %s\n", match.Topic, match.HelpPath)
 		for _, snippet := range match.Snippets {
-			fmt.Fprintf(stdout, "    %s\n", snippet)
+			fmt.Fprintf(stdout, "    %s\n", strings.ReplaceAll(snippet, "\n", "\n    "))
 		}
 	}
 	return 0

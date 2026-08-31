@@ -21,7 +21,18 @@ for _, match := range index.Search("-modfile") {
 }
 ```
 
-`Search` treats whitespace-separated terms as an AND query. A `Match` contains the topic, matching text lines, and a suggested path such as `go help build`. `Index`, `Document`, and `Match` have JSON tags and can be passed to `encoding/json` directly.
+`Search` treats whitespace-separated terms as a case-insensitive AND query.
+Terms starting with `-` match option boundaries: `-bench` matches `-bench regexp`
+and `'-bench=.'`, but not `-benchtime`, `-benchmem` or `--bench`. Letters, digits,
+underscores and hyphens adjoining an option are not boundaries. Ordinary words
+retain substring matching. Ranking uses the same rule as filtering and snippets.
+
+A `Match` contains the topic, up to five matching snippets, and a suggested path
+such as `go help build`. A snippet includes its immediately following, more
+deeply indented explanation, including paragraphs, and stops before a peer option
+or section. Snippets may contain newlines; this relies on Go help indentation,
+not a general documentation parser. `Index`, `Document`, and `Match` have JSON
+tags and can be passed to `encoding/json` directly.
 
 `Options.GoCommand` can select another executable; it defaults to `go`. Commands are run with the supplied `context.Context`, and failures include the command and command output.
 
@@ -51,6 +62,8 @@ other non-Unix platforms, and crash/power-loss durability is not promised.
 
 ```text
 go run ./cmd/gohelp -q=-modfile
+go run ./cmd/gohelp -q=-bench
+go run ./cmd/gohelp -q=-benchtime
 go run ./cmd/gohelp -q testflag -json
 go run ./cmd/gohelp -cache gohelp-cache.json -q=-modfile
 go run ./cmd/gohelp -cache gohelp-cache.json -refresh -q=-modfile
@@ -60,8 +73,16 @@ The CLI prints matching snippets and help paths. Use `-json` for a JSON array of
 
 ## Development
 
+Requires Go 1.23+. CI checks Go 1.23.0 and the current stable release on Ubuntu.
+Tests use both fixed boundary samples and the actual installed `go help` output;
+the Go command must be on PATH. Maintenance stays focused on local-toolchain
+help search and cache correctness, without embedded documentation or remote AI.
+
 ```text
-gofmt -w .
-GOWORK=off go test ./...
+export GOWORK=off
+gofmt -l .
+go build ./...
 go vet ./...
+go test -count=1 ./...
+go test -race -count=1 ./...
 ```

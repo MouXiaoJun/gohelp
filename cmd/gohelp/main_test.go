@@ -35,6 +35,29 @@ func TestRunUsesValidCache(t *testing.T) {
 	}
 }
 
+func TestRunPrintsOptionExplanation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "index.json")
+	index := &gohelp.Index{
+		GoCommand: "go",
+		GoVersion: currentGoVersion(t),
+		Documents: []gohelp.Document{{
+			Topic: "testflag", HelpPath: "go help testflag",
+			Text: "-bench regexp\n    Run matching benchmarks.\n-benchtime t\n    Run for a duration.",
+		}},
+	}
+	if err := index.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-cache", path, "-q=-bench"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code %d, stderr %s", code, &stderr)
+	}
+	want := "testflag\n  go help testflag\n    -bench regexp\n        Run matching benchmarks.\n"
+	if stdout.String() != want {
+		t.Fatalf("output = %q, want %q", stdout.String(), want)
+	}
+}
+
 func TestRunRebuildsCacheWhenGoVersionChanges(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "index.json")
 	index := &gohelp.Index{
